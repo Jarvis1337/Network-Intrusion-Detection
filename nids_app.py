@@ -3,122 +3,109 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# --- Page Config ---
-st.set_page_config(page_title="AI-NIDS Dashboard", layout="wide")
+st.set_page_config(page_title="Real AI-NIDS Dashboard", layout="wide")
 
-# --- Title and Introduction ---
-st.title("🛡️ AI-Based Network Intrusion Detection System")
-st.markdown("""
-This system uses **Machine Learning (Random Forest)** to detect network anomalies.
-It operates in **Simulation Mode**, generating synthetic traffic data for demonstration.
-""")
+st.title("🛡️ AI-Based NIDS (Production Mode)")
+st.markdown("This system trains on the **Real CIC-IDS2017 Dataset** to detect DDoS attacks.")
 
-# --- Sidebar ---
 st.sidebar.header("Control Panel")
 
-# --- Function to Generate Synthetic Data (Simulation Mode) ---
-def generate_data(n_samples=2000):
-    np.random.seed(42)
-    packet_size = np.random.randint(40, 1500, n_samples)
-    time_interval = np.random.exponential(scale=1.0, size=n_samples)
-    protocol = np.random.choice([0, 1, 2], n_samples, p=[0.6, 0.3, 0.1])
-    flags = np.random.choice([0, 1, 2], n_samples)
+@st.cache_data # Cache data to speed up reloading
+def load_data():
+    filename = 'Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv' # Dataset Using: Intrusion detection evaluation dataset (CIC-IDS2017)
     
-    labels = []
-    for i in range(n_samples):
-        if (packet_size[i] < 100) and (time_interval[i] < 0.1) and (flags[i] == 1):
-            labels.append(1) # Attack
-        elif (protocol[i] == 2) and (packet_size[i] > 1000):
-            labels.append(1) # Ping of Death scenario
-        else:
-            labels.append(0) # Normal
-            
-    df = pd.DataFrame({
-        'Packet_Size': packet_size,
-        'Time_Interval': time_interval,
-        'Protocol': protocol,
-        'Flag': flags,
-        'Label': labels
-    })
+    try:
+        df = pd.read_csv(filename)
+    except FileNotFoundError:
+        st.error(f"Error: '{filename}' not found. Please place the CSV file in the project folder.")
+        return None
+
+    df.columns = df.columns.str.strip()
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.dropna()
     return df
 
-# --- Model Training Section ---
 if 'model' not in st.session_state:
     st.session_state['model'] = None
     st.session_state['accuracy'] = 0
 
-if st.sidebar.button("Train Model Now"):
-    with st.spinner("Generating Data & Training Model..."):
-        df = generate_data()
+if st.sidebar.button("Train Model on Real Data"):
+    with st.spinner("Loading heavy dataset and Training... (This may take time)"):
+        df = load_data()
         
-        X = df.drop('Label', axis=1)
-        y = df['Label']
-        
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        
-        rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-        rf_model.fit(X_train, y_train)
-        
-        y_pred = rf_model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        
-        st.session_state['model'] = rf_model
-        st.session_state['accuracy'] = acc
-        st.session_state['X_test'] = X_test # Saving for metrics visualization
-        st.session_state['y_test'] = y_test
-        
-    st.sidebar.success(f"Model Trained! Accuracy: {acc*100:.2f}%")
+        if df is not None:
+            features = ['Destination Port', 'Flow Duration', 'Total Fwd Packets', 
+                        'Total Backward Packets', 'Total Length of Fwd Packets', 
+                        'Packet Length Mean', 'Fwd Packet Length Max']
+            
+            available_features = [c for c in features if c in df.columns]
+            
+            X = df[available_features]
+            y = df['Label']
+            
+            le = LabelEncoder()
+            y = le.fit_transform(y)
+            st.session_state['le'] = le
 
-# --- Main Dashboard Area ---
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            
+            # Model Training
+            rf_model = RandomForestClassifier(n_estimators=20, random_state=42, n_jobs=-1)
+            rf_model.fit(X_train, y_train)
+            
+            # Evaluation
+            y_pred = rf_model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            
+            st.session_state['model'] = rf_model
+            st.session_state['accuracy'] = acc
+            st.session_state['X_test'] = X_test
+            st.session_state['y_test'] = y_test
+            st.sidebar.success(f"Training Complete! Accuracy: {acc*100:.2f}%")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📊 Training Metrics")
+    st.subheader("📊 Model Performance")
     if st.session_state['model']:
-        st.metric(label="Model Accuracy", value=f"{st.session_state['accuracy']*100:.2f}%")
+        st.metric("Accuracy", f"{st.session_state['accuracy']*100:.2f}%")
         
         st.write("Confusion Matrix:")
         cm = confusion_matrix(st.session_state['y_test'], st.session_state['model'].predict(st.session_state['X_test']))
         fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Reds', ax=ax)
         st.pyplot(fig)
     else:
-        st.info("Please click 'Train Model Now' in the sidebar to start.")
+        st.info("Please download the CSV and click 'Train Model' to start.")
 
 with col2:
-    st.subheader("🕵️ Live Traffic Simulator")
-    st.write("Input network packet parameters to test the model:")
-    
-    # User Inputs for Prediction
-    p_size = st.slider("Packet Size (bytes)", 40, 1500, 64)
-    t_interval = st.number_input("Time Interval (ms)", 0.0, 10.0, 0.5)
-    proto = st.selectbox("Protocol", options=[0, 1, 2], format_func=lambda x: {0: "TCP", 1: "UDP", 2: "ICMP"}[x])
-    flag = st.selectbox("Flag", options=[0, 1, 2], format_func=lambda x: {0: "Normal", 1: "SYN", 2: "ACK"}[x])
-    
-    if st.button("Analyze Packet"):
-        if st.session_state['model'] is None:
-            st.error("Model is not trained yet!")
-        else:
-            input_data = pd.DataFrame({
-                'Packet_Size': [p_size],
-                'Time_Interval': [t_interval],
-                'Protocol': [proto],
-                'Flag': [flag]
-            })
-            
-            prediction = st.session_state['model'].predict(input_data)[0]
-            probability = st.session_state['model'].predict_proba(input_data)[0][1]
-            
-            st.markdown("---")
-            if prediction == 1:
-                st.error(f"🚨 ALERT: Malicious Traffic Detected! (Confidence: {probability*100:.2f}%)")
-            else:
-                st.success(f"✅ Safe Traffic. (Confidence: {(1-probability)*100:.2f}%)")
+    st.subheader("🔎 Real Traffic Analysis")
+    if st.session_state['model']:
+        st.write("Test the model with values similar to the dataset:")
+        
+        dest_port = st.number_input("Destination Port", 0, 65535, 80)
+        flow_dur = st.number_input("Flow Duration", 0, 10000000, 5000)
+        fwd_pkts = st.number_input("Total Fwd Packets", 0, 10000, 5)
+        bwd_pkts = st.number_input("Total Backward Packets", 0, 10000, 3)
+        len_fwd = st.number_input("Total Length Fwd Packets", 0, 100000, 200)
+        pkt_mean = st.number_input("Packet Length Mean", 0.0, 2000.0, 50.0)
+        fwd_max = st.number_input("Fwd Packet Length Max", 0, 2000, 100)
 
-st.markdown("---")
-st.caption("AI-NIDS Project | Based on Random Forest Algorithm")
+        if st.button("Predict Attack"):
+            input_data = pd.DataFrame([[dest_port, flow_dur, fwd_pkts, bwd_pkts, len_fwd, pkt_mean, fwd_max]], 
+                                      columns=['Destination Port', 'Flow Duration', 'Total Fwd Packets', 
+                                               'Total Backward Packets', 'Total Length of Fwd Packets', 
+                                               'Packet Length Mean', 'Fwd Packet Length Max'])
+            
+            pred_code = st.session_state['model'].predict(input_data)[0]
+            pred_label = st.session_state['le'].inverse_transform([pred_code])[0]
+            
+            if "BENIGN" in pred_label:
+                st.success(f"✅ Traffic is SAFE ({pred_label})")
+            else:
+                st.error(f"🚨 ALERT: Attack Detected! Type: {pred_label}")
