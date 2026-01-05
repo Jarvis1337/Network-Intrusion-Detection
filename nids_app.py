@@ -36,7 +36,7 @@ def load_csv_data(file_path=None):
     if file_path and os.path.exists(file_path):
         csv_file = file_path
     elif csv_files:
-        csv_file = csv_files[0]
+        csv_file = csv_files[0]  # Use first CSV found
     else:
         st.warning("⚠️ No CSV file found. Using simulated data instead.")
         st.info("📥 To use real data, download CIC-IDS2017 dataset and place CSV in project folder")
@@ -141,7 +141,6 @@ def preprocess_data(df, is_real_csv=True):
         numeric_cols = data.select_dtypes(include=[np.number]).columns
         feature_columns = [col for col in numeric_cols if col not in [label_col, 'Attack']]
     
-    # Limit to top 15 features for performance
     feature_columns = feature_columns[:15]
     
     if not feature_columns:
@@ -194,7 +193,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Model Training")
     
-    if st.sidebar.button("🚀 Train Model Now", use_container_width=True):
+    if st.sidebar.button("🚀 Train Model Now", width="stretch"):
         st.session_state['model_trained'] = True
         st.session_state['selected_file'] = selected_file
     
@@ -222,7 +221,7 @@ def main():
             st.metric("Attack Traffic", attack_count)
         
         st.write("**Sample Data (First 5 rows):**")
-        st.dataframe(data.head(), use_container_width=True)
+        st.dataframe(data.head(), width="stretch")
         
         if 'Label' in data.columns or ' Label' in data.columns:
             label_col = 'Label' if 'Label' in data.columns else ' Label'
@@ -242,16 +241,11 @@ def main():
         X, y, feature_cols = result
         
         st.info(f"Using {len(feature_cols)} features for training")
-        
         model, X_test, y_test, y_pred, accuracy = train_model(X, y)
-        
         st.success(f"✅ Model trained successfully! Accuracy: **{accuracy*100:.2f}%**")
-        
         st.session_state['model'] = model
         st.session_state['feature_cols'] = feature_cols
-        st.session_state['X_sample'] = X.iloc[0]
-        
-        # Model Performance
+        st.session_state['X_sample'] = X.iloc[0]        
         st.subheader("📈 Model Performance Metrics")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -293,7 +287,7 @@ def main():
             }).sort_values('Importance', ascending=False).head(10)
             
             fig, ax = plt.subplots(figsize=(6, 4))
-            sns.barplot(data=feat_imp_df, y='Feature', x='Importance', palette='viridis')
+            sns.barplot(data=feat_imp_df, y='Feature', x='Importance', hue='Feature', palette='viridis', legend=False)
             plt.title('Top 10 Important Features')
             st.pyplot(fig)
         
@@ -326,7 +320,7 @@ def main():
         for feature in feature_cols[9:]:
             input_data[feature] = float(X[feature].median())
         
-        if st.button("🔍 Analyze Traffic", use_container_width=True):
+        if st.button("🔍 Analyze Traffic", width="stretch"):
             # Create DataFrame
             test_df = pd.DataFrame([input_data])
             
@@ -353,7 +347,7 @@ def main():
         st.subheader("📖 How to Use This System")
         st.markdown("""
         1. **Download CIC-IDS2017 Dataset** from [UNB Website](https://www.unb.ca/cic/datasets/ids-2017.html)
-        2. **Place CSV file** in the `Root` dir
+        2. **Place CSV file** in the `AI_NIDS_Project` folder
         3. **Select the CSV file** from sidebar dropdown
         4. **Click 'Train Model Now'** to train the ML model
         5. **Test with Live Simulator** to detect attacks
