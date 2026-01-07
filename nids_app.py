@@ -1,63 +1,68 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_curve, auc, precision_recall_curve
 from sklearn.preprocessing import LabelEncoder
 import seaborn as sns
 import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import time
 import os
+from datetime import datetime
+import io
 
 st.set_page_config(
-    page_title="AI Network Intrusion Detection System",
+    page_title="Advanced AI Network Intrusion Detection System",
     page_icon="🛡️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("🛡️ AI-Based Network Intrusion Detection System")
 st.markdown("""
-**Real-time Network Security Monitoring using Machine Learning**
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+    }
+    .stAlert {
+        border-radius: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-This system uses Random Forest algorithm to detect network intrusions using the CIC-IDS2017 dataset.
-""")
+st.markdown('<p class="main-header">🛡️ Advanced AI Network Intrusion Detection System</p>', unsafe_allow_html=True)
+st.markdown("""
+<div style='text-align: center; margin-bottom: 2rem;'>
+    <b>Professional Network Security Monitoring with Advanced Machine Learning</b><br>
+    Multi-Model Analysis | Real-time Detection | Comprehensive Analytics
+</div>
+""", unsafe_allow_html=True)
 
-st.sidebar.header("⚙️ Control Panel")
+if 'training_history' not in st.session_state:
+    st.session_state['training_history'] = []
+if 'prediction_count' not in st.session_state:
+    st.session_state['prediction_count'] = {'normal': 0, 'attack': 0}
+
+st.sidebar.header("⚙️ Advanced Control Panel")
 st.sidebar.markdown("---")
 
-# Function to load CSV data
-@st.cache_data
-def load_csv_data(file_path=None):
-    """Load data from CSV file or use simulation"""
-    
-    csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
-    
-    if file_path and os.path.exists(file_path):
-        csv_file = file_path
-    elif csv_files:
-        csv_file = csv_files[0]  # Use first CSV found
-    else:
-        st.warning("⚠️ No CSV file found. Using simulated data instead.")
-        st.info("📥 To use real data, download CIC-IDS2017 dataset and place CSV in project folder")
-        return generate_simulation_data(2000), False
-    
-    try:
-        st.info(f"📂 Loading data from: {csv_file}")
-        df = pd.read_csv(csv_file)
-        
-        # Clean column names (remove extra spaces)
-        df.columns = df.columns.str.strip()
-        
-        st.success(f"✅ Successfully loaded {len(df)} records from CSV!")
-        return df, True
-        
-    except Exception as e:
-        st.error(f"❌ Error loading CSV: {str(e)}")
-        st.info("Using simulated data instead...")
-        return generate_simulation_data(2000), False
+theme = st.sidebar.selectbox("🎨 Theme", ["Professional", "Dark Mode", "Light Mode"])
 
-# Function to generate simulated data (backup)
 def generate_simulation_data(num_samples=1000):
     """Generate realistic network traffic data for training"""
     np.random.seed(42)
@@ -73,6 +78,8 @@ def generate_simulation_data(num_samples=1000):
         'Fwd Packet Length Mean': np.random.normal(500, 150, normal_samples),
         'Flow Bytes/s': np.random.normal(10000, 3000, normal_samples),
         'Flow Packets/s': np.random.normal(50, 15, normal_samples),
+        'Fwd IAT Mean': np.random.normal(100000, 30000, normal_samples),
+        'Bwd IAT Mean': np.random.normal(100000, 30000, normal_samples),
         'Label': ['BENIGN'] * normal_samples
     }
     
@@ -87,7 +94,9 @@ def generate_simulation_data(num_samples=1000):
         'Fwd Packet Length Mean': np.random.normal(1500, 500, attack_samples),
         'Flow Bytes/s': np.random.normal(50000, 10000, attack_samples),
         'Flow Packets/s': np.random.normal(200, 50, attack_samples),
-        'Label': ['DDoS'] * attack_samples
+        'Fwd IAT Mean': np.random.normal(10000, 5000, attack_samples),
+        'Bwd IAT Mean': np.random.normal(10000, 5000, attack_samples),
+        'Label': np.random.choice(['DDoS', 'DoS', 'PortScan', 'BruteForce'], attack_samples)
     }
     
     df_normal = pd.DataFrame(normal_data)
@@ -97,12 +106,29 @@ def generate_simulation_data(num_samples=1000):
     
     return df
 
-# Preprocess data
+def load_csv_data(file_path):
+    """Load data from CSV file or use simulation"""
+    
+    if file_path and os.path.exists(file_path):
+        try:
+            st.info(f"📂 Loading data from: {os.path.basename(file_path)}")
+            df = pd.read_csv(file_path)
+            df.columns = df.columns.str.strip()
+            st.success(f"✅ Successfully loaded {len(df)} records from CSV!")
+            return df, True
+        except Exception as e:
+            st.error(f"❌ Error loading CSV: {str(e)}")
+            st.info("Using simulated data instead...")
+            return generate_simulation_data(2000), False
+    else:
+        st.warning("⚠️ No CSV file found. Using simulated data instead.")
+        st.info("📥 To use real data, download CIC-IDS2017 dataset and place CSV in Datasets folder")
+        return generate_simulation_data(2000), False
+
 def preprocess_data(df, is_real_csv=True):
     """Preprocess the dataset for training"""
     
     data = df.copy()
-    
     data = data.replace([np.inf, -np.inf], np.nan)
     data = data.fillna(0)
     
@@ -112,13 +138,11 @@ def preprocess_data(df, is_real_csv=True):
         label_col = ' Label'
     else:
         st.error("❌ Label column not found!")
-        return None, None
+        return None, None, None
     
     data['Attack'] = data[label_col].apply(lambda x: 0 if 'BENIGN' in str(x).upper() else 1)
     
     feature_columns = []
-    
-    # Common feature names in CIC-IDS2017
     possible_features = [
         'Flow Duration', 'Total Fwd Packets', 'Total Backward Packets',
         'Total Length of Fwd Packets', 'Total Length of Bwd Packets',
@@ -130,11 +154,10 @@ def preprocess_data(df, is_real_csv=True):
         'Packet Length Mean', 'Packet Length Std', 'Packet Length Variance'
     ]
     
-    # Find available features
     for feature in possible_features:
         if feature in data.columns:
             feature_columns.append(feature)
-        elif f' {feature}' in data.columns:  # Handle space prefix
+        elif f' {feature}' in data.columns:
             feature_columns.append(f' {feature}')
     
     if len(feature_columns) < 5:
@@ -145,213 +168,706 @@ def preprocess_data(df, is_real_csv=True):
     
     if not feature_columns:
         st.error("❌ No valid features found!")
-        return None, None
+        return None, None, None
     
     X = data[feature_columns]
     y = data['Attack']
     
     return X, y, feature_columns
 
-@st.cache_resource
-def train_model(X, y):
-    """Train Random Forest Classifier"""
+def train_models(X, y, selected_models):
+    """Train multiple ML models"""
     
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.3, random_state=42, stratify=y
     )
     
-    model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=15,
-        min_samples_split=5,
-        random_state=42,
-        n_jobs=-1
-    )
+    models = {}
+    results = {}
     
-    with st.spinner("🤖 Training Random Forest model..."):
+    model_configs = {
+        'Random Forest': RandomForestClassifier(n_estimators=100, max_depth=15, random_state=42, n_jobs=-1),
+        'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+        'SVM': SVC(kernel='rbf', probability=True, random_state=42),
+        'Neural Network': MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
+    }
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, model_name in enumerate(selected_models):
+        status_text.text(f"🤖 Training {model_name}...")
+        
+        model = model_configs[model_name]
         model.fit(X_train, y_train)
+        
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)[:, 1]
+        
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        roc_auc = auc(fpr, tpr)
+        
+        precision, recall, _ = precision_recall_curve(y_test, y_proba)
+        
+        models[model_name] = model
+        results[model_name] = {
+            'accuracy': accuracy,
+            'y_test': y_test,
+            'y_pred': y_pred,
+            'y_proba': y_proba,
+            'fpr': fpr,
+            'tpr': tpr,
+            'roc_auc': roc_auc,
+            'precision': precision,
+            'recall': recall,
+            'confusion_matrix': confusion_matrix(y_test, y_pred)
+        }
+        
+        progress_bar.progress((idx + 1) / len(selected_models))
     
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
+    status_text.text("✅ All models trained successfully!")
+    time.sleep(0.5)
+    status_text.empty()
+    progress_bar.empty()
     
-    return model, X_test, y_test, y_pred, accuracy
+    return models, results, X_test, y_test, X_train
 
+# Main Application
 def main():
+    
     st.sidebar.subheader("📁 Dataset Selection")
     
-    csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
+    if os.path.exists("Datasets"):
+        csv_files = [f for f in os.listdir("Datasets") if f.endswith('.csv')]
+    else:
+        csv_files = []
     
     if csv_files:
         selected_file = st.sidebar.selectbox("Select CSV File:", csv_files)
-        use_csv = True
+        selected_file_path = os.path.join("Datasets", selected_file)
     else:
-        st.sidebar.warning("No CSV files found in directory")
-        st.sidebar.info("Place CIC-IDS2017 CSV file in project folder")
+        st.sidebar.warning("No CSV files found")
+        st.sidebar.info("Place CSV in Datasets folder")
         selected_file = None
-        use_csv = False
+        selected_file_path = None
     
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📊 Model Training")
+    st.sidebar.subheader("🤖 Model Selection")
     
-    if st.sidebar.button("🚀 Train Model Now", width="stretch"):
+    model_options = ['Random Forest', 'Gradient Boosting', 'SVM', 'Neural Network']
+    selected_models = st.sidebar.multiselect(
+        "Select Models to Train:",
+        model_options,
+        default=['Random Forest', 'Gradient Boosting']
+    )
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Training Options")
+    
+    data_size = st.sidebar.slider("Simulated Data Size:", 1000, 5000, 2000, 500)
+    
+    st.sidebar.markdown("---")
+    
+    if st.sidebar.button("🚀 Train Models Now", use_container_width=True):
+        if not selected_models:
+            st.error("⚠️ Please select at least one model!")
+            return
+        
         st.session_state['model_trained'] = True
-        st.session_state['selected_file'] = selected_file
+        st.session_state['train_file_path'] = selected_file_path
+        st.session_state['selected_models'] = selected_models
+        st.session_state['data_size'] = data_size
+        st.rerun()
     
-    # Load data
-    data, is_real = load_csv_data(selected_file if use_csv else None)
-    
-    # Display dataset info
-    with st.expander("📁 View Dataset Information", expanded=True):
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Records", len(data))
-        with col2:
-            st.metric("Features", len(data.columns) - 1)
-        with col3:
-            if 'Label' in data.columns:
-                benign_count = len(data[data['Label'].str.contains('BENIGN', case=False, na=False)])
-            elif ' Label' in data.columns:
-                benign_count = len(data[data[' Label'].str.contains('BENIGN', case=False, na=False)])
-            else:
-                benign_count = 0
-            st.metric("Normal Traffic", benign_count)
-        with col4:
-            attack_count = len(data) - benign_count
-            st.metric("Attack Traffic", attack_count)
-        
-        st.write("**Sample Data (First 5 rows):**")
-        st.dataframe(data.head(), width="stretch")
-        
-        if 'Label' in data.columns or ' Label' in data.columns:
-            label_col = 'Label' if 'Label' in data.columns else ' Label'
-            st.write("**Attack Types Distribution:**")
-            attack_dist = data[label_col].value_counts()
-            st.bar_chart(attack_dist)
-    
-    # Train model if button clicked
     if st.session_state.get('model_trained', False):
+        
+        train_file = st.session_state.get('train_file_path', None)
+        data, is_real = load_csv_data(train_file)
+        
+        if not is_real:
+            data = generate_simulation_data(st.session_state.get('data_size', 2000))
+        
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Dataset Overview", 
+            "🤖 Model Performance", 
+            "📈 Advanced Analytics",
+            "🔴 Live Detection",
+            "📜 History & Reports"
+        ])
+        
+        with tab1:
+            st.subheader("📁 Dataset Information")
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                st.metric("📦 Total Records", len(data))
+            with col2:
+                st.metric("📊 Features", len(data.columns) - 1)
+            with col3:
+                if 'Label' in data.columns:
+                    benign_count = len(data[data['Label'].str.contains('BENIGN', case=False, na=False)])
+                elif ' Label' in data.columns:
+                    benign_count = len(data[data[' Label'].str.contains('BENIGN', case=False, na=False)])
+                else:
+                    benign_count = 0
+                st.metric("✅ Normal Traffic", benign_count)
+            with col4:
+                attack_count = len(data) - benign_count
+                st.metric("🚨 Attack Traffic", attack_count)
+            with col5:
+                attack_ratio = (attack_count / len(data)) * 100 if len(data) > 0 else 0
+                st.metric("⚠️ Attack Ratio", f"{attack_ratio:.1f}%")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Sample Data Preview:**")
+                st.dataframe(data.head(10), use_container_width=True)
+            
+            with col2:
+                if 'Label' in data.columns or ' Label' in data.columns:
+                    label_col = 'Label' if 'Label' in data.columns else ' Label'
+                    st.write("**Attack Types Distribution:**")
+                    
+                    attack_dist = data[label_col].value_counts()
+                    
+                    fig = px.pie(
+                        values=attack_dist.values, 
+                        names=attack_dist.index,
+                        title="Traffic Distribution",
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Set3
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+        
         # Preprocess data
         result = preprocess_data(data, is_real)
         
-        if result is None:
+        if result[0] is None:
             st.error("Failed to preprocess data!")
             return
         
         X, y, feature_cols = result
         
-        st.info(f"Using {len(feature_cols)} features for training")
-        model, X_test, y_test, y_pred, accuracy = train_model(X, y)
-        st.success(f"✅ Model trained successfully! Accuracy: **{accuracy*100:.2f}%**")
-        st.session_state['model'] = model
+        selected_models = st.session_state.get('selected_models', ['Random Forest'])
+        models, results, X_test, y_test, X_train = train_models(X, y, selected_models)
+        
+        st.session_state['models'] = models
+        st.session_state['results'] = results
         st.session_state['feature_cols'] = feature_cols
-        st.session_state['X_sample'] = X.iloc[0]        
-        st.subheader("📈 Model Performance Metrics")
+        st.session_state['X_data'] = X
         
-        col1, col2, col3, col4 = st.columns(4)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for model_name, result in results.items():
+            st.session_state['training_history'].append({
+                'timestamp': timestamp,
+                'model': model_name,
+                'accuracy': result['accuracy'],
+                'samples': len(X)
+            })
         
-        cm = confusion_matrix(y_test, y_pred)
-        tn, fp, fn, tp = cm.ravel()
-        
-        with col1:
-            st.metric("🎯 Accuracy", f"{accuracy*100:.2f}%")
-        with col2:
-            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-            st.metric("🔍 Precision", f"{precision*100:.2f}%")
-        with col3:
-            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-            st.metric("📊 Recall", f"{recall*100:.2f}%")
-        with col4:
-            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-            st.metric("⚡ F1-Score", f"{f1*100:.2f}%")
-        
-        # Confusion Matrix
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🔢 Confusion Matrix")
-            fig, ax = plt.subplots(figsize=(6, 4))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=['Normal', 'Attack'],
-                        yticklabels=['Normal', 'Attack'])
-            plt.ylabel('Actual')
-            plt.xlabel('Predicted')
-            st.pyplot(fig)
-        
-        with col2:
-            st.subheader("🎯 Feature Importance")
-            importance = model.feature_importances_
-            feat_imp_df = pd.DataFrame({
-                'Feature': feature_cols,
-                'Importance': importance
-            }).sort_values('Importance', ascending=False).head(10)
+        with tab2:
+            st.subheader("🤖 Model Performance Comparison")
             
-            fig, ax = plt.subplots(figsize=(6, 4))
-            sns.barplot(data=feat_imp_df, y='Feature', x='Importance', hue='Feature', palette='viridis', legend=False)
-            plt.title('Top 10 Important Features')
-            st.pyplot(fig)
+            col1, col2, col3, col4 = st.columns(4)
+            
+            best_model = max(results.items(), key=lambda x: x[1]['accuracy'])
+            
+            with col1:
+                st.metric("🏆 Best Model", best_model[0])
+            with col2:
+                st.metric("🎯 Best Accuracy", f"{best_model[1]['accuracy']*100:.2f}%")
+            with col3:
+                avg_accuracy = np.mean([r['accuracy'] for r in results.values()])
+                st.metric("📊 Avg Accuracy", f"{avg_accuracy*100:.2f}%")
+            with col4:
+                st.metric("🔢 Models Trained", len(results))
+            
+            # Model comparison bar chart
+            st.write("**Accuracy Comparison:**")
+            model_names = list(results.keys())
+            accuracies = [results[m]['accuracy'] * 100 for m in model_names]
+            
+            fig = go.Figure(data=[
+                go.Bar(x=model_names, y=accuracies, 
+                       text=[f"{acc:.2f}%" for acc in accuracies],
+                       textposition='auto',
+                       marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'])
+            ])
+            fig.update_layout(
+                title="Model Accuracy Comparison",
+                xaxis_title="Model",
+                yaxis_title="Accuracy (%)",
+                yaxis_range=[0, 100],
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed metrics for each model
+            st.write("**Detailed Performance Metrics:**")
+            
+            for model_name, result in results.items():
+                with st.expander(f"📊 {model_name} - Detailed Metrics", expanded=(model_name==best_model[0])):
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    cm = result['confusion_matrix']
+                    tn, fp, fn, tp = cm.ravel()
+                    
+                    accuracy = result['accuracy']
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+                    
+                    with col1:
+                        st.metric("🎯 Accuracy", f"{accuracy*100:.2f}%")
+                    with col2:
+                        st.metric("🔍 Precision", f"{precision*100:.2f}%")
+                    with col3:
+                        st.metric("📊 Recall", f"{recall*100:.2f}%")
+                    with col4:
+                        st.metric("⚡ F1-Score", f"{f1*100:.2f}%")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Confusion Matrix
+                        fig, ax = plt.subplots(figsize=(6, 4))
+                        sns.heatmap(cm, annot=True, fmt='d', cmap='RdYlGn', 
+                                    xticklabels=['Normal', 'Attack'],
+                                    yticklabels=['Normal', 'Attack'],
+                                    cbar_kws={'label': 'Count'})
+                        plt.ylabel('Actual')
+                        plt.xlabel('Predicted')
+                        plt.title(f'{model_name} - Confusion Matrix')
+                        st.pyplot(fig)
+                    
+                    with col2:
+                        # Metrics bar chart
+                        metrics_data = pd.DataFrame({
+                            'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score'],
+                            'Score': [accuracy*100, precision*100, recall*100, f1*100]
+                        })
+                        
+                        fig = px.bar(metrics_data, x='Metric', y='Score',
+                                    title=f'{model_name} - Performance Metrics',
+                                    color='Metric',
+                                    text='Score',
+                                    color_discrete_sequence=px.colors.qualitative.Pastel)
+                        fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+                        fig.update_layout(yaxis_range=[0, 105], showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
         
-        # Live Traffic Simulator
-        st.markdown("---")
-        st.subheader("🔴 Live Traffic Simulator")
-        st.write("Test the model with custom network parameters")
-        
-        # Create input form based on features
-        input_data = {}
-        
-        cols = st.columns(3)
-        for idx, feature in enumerate(feature_cols[:9]):  # Show first 9 features
-            with cols[idx % 3]:
-                # Get sample value
-                sample_val = float(X[feature].median())
-                min_val = float(X[feature].min())
-                max_val = float(X[feature].max())
+        with tab3:
+            st.subheader("📈 Advanced Analytics & Visualizations")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**ROC Curves Comparison:**")
                 
-                # Create slider with reasonable range
-                input_data[feature] = st.slider(
-                    feature.strip(),
-                    min_value=min_val,
-                    max_value=max_val,
-                    value=sample_val,
-                    key=feature
+                fig = go.Figure()
+                
+                for model_name, result in results.items():
+                    fig.add_trace(go.Scatter(
+                        x=result['fpr'], 
+                        y=result['tpr'],
+                        name=f"{model_name} (AUC={result['roc_auc']:.3f})",
+                        mode='lines',
+                        line=dict(width=2)
+                    ))
+                
+                fig.add_trace(go.Scatter(
+                    x=[0, 1], y=[0, 1],
+                    name='Random Classifier',
+                    mode='lines',
+                    line=dict(dash='dash', color='gray')
+                ))
+                
+                fig.update_layout(
+                    title='Receiver Operating Characteristic (ROC) Curves',
+                    xaxis_title='False Positive Rate',
+                    yaxis_title='True Positive Rate',
+                    height=500
                 )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.write("**Precision-Recall Curves:**")
+                
+                fig = go.Figure()
+                
+                for model_name, result in results.items():
+                    fig.add_trace(go.Scatter(
+                        x=result['recall'], 
+                        y=result['precision'],
+                        name=model_name,
+                        mode='lines',
+                        line=dict(width=2)
+                    ))
+                
+                fig.update_layout(
+                    title='Precision-Recall Curves',
+                    xaxis_title='Recall',
+                    yaxis_title='Precision',
+                    height=500
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.write("**Feature Importance Analysis:**")
+            
+            # Get feature importance from Random Forest
+            if 'Random Forest' in models:
+                rf_model = models['Random Forest']
+                importance = rf_model.feature_importances_
+                
+                feat_imp_df = pd.DataFrame({
+                    'Feature': feature_cols,
+                    'Importance': importance
+                }).sort_values('Importance', ascending=False)
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    fig = px.bar(feat_imp_df, x='Importance', y='Feature',
+                                orientation='h',
+                                title='Feature Importance (Random Forest)',
+                                color='Importance',
+                                color_continuous_scale='Viridis')
+                    fig.update_layout(height=500)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.write("**Top 5 Features:**")
+                    for idx, row in feat_imp_df.head(5).iterrows():
+                        st.metric(
+                            row['Feature'][:20],
+                            f"{row['Importance']:.4f}",
+                            delta=None
+                        )
+            
+            st.write("**Feature Correlation Heatmap:**")
+            
+            corr_matrix = X[feature_cols[:10]].corr()
+            
+            fig = px.imshow(corr_matrix,
+                           labels=dict(color="Correlation"),
+                           x=corr_matrix.columns,
+                           y=corr_matrix.columns,
+                           color_continuous_scale='RdBu_r',
+                           aspect="auto")
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
         
-        # Fill remaining features with median values
-        for feature in feature_cols[9:]:
-            input_data[feature] = float(X[feature].median())
+        with tab4:
+            st.subheader("🔴 Live Traffic Detection & Analysis")
+            
+            # Real-time counters
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("✅ Normal Detected", st.session_state['prediction_count']['normal'])
+            with col2:
+                st.metric("🚨 Attacks Detected", st.session_state['prediction_count']['attack'])
+            with col3:
+                total_pred = sum(st.session_state['prediction_count'].values())
+                st.metric("📊 Total Predictions", total_pred)
+            with col4:
+                if total_pred > 0:
+                    attack_pct = (st.session_state['prediction_count']['attack'] / total_pred) * 100
+                    st.metric("⚠️ Attack Rate", f"{attack_pct:.1f}%")
+                else:
+                    st.metric("⚠️ Attack Rate", "0%")
+            
+            st.markdown("---")
+            
+            # Model selection for prediction
+            selected_pred_model = st.selectbox(
+                "Select Model for Prediction:",
+                list(models.keys()),
+                key="pred_model"
+            )
+            
+            st.write("**Adjust Network Parameters:**")
+            
+            input_data = {}
+            X_data = st.session_state['X_data']
+            
+            cols = st.columns(3)
+            for idx, feature in enumerate(feature_cols[:9]):
+                with cols[idx % 3]:
+                    sample_val = float(X_data[feature].median())
+                    min_val = float(X_data[feature].min())
+                    max_val = float(X_data[feature].max())
+                    
+                    input_data[feature] = st.slider(
+                        feature.strip()[:30],
+                        min_value=min_val,
+                        max_value=max_val,
+                        value=sample_val,
+                        key=f"slider_{feature}"
+                    )
+            
+            for feature in feature_cols[9:]:
+                input_data[feature] = float(X_data[feature].median())
+            
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                if st.button("🔍 Analyze Traffic", use_container_width=True):
+                    test_df = pd.DataFrame([input_data])
+                    
+                    model = models[selected_pred_model]
+                    prediction = model.predict(test_df)[0]
+                    probability = model.predict_proba(test_df)[0]
+                    
+                    # Update counters
+                    if prediction == 0:
+                        st.session_state['prediction_count']['normal'] += 1
+                    else:
+                        st.session_state['prediction_count']['attack'] += 1
+                    
+                    st.markdown("### 🎯 Detection Result")
+                    
+                    if prediction == 0:
+                        st.success(f"✅ **NORMAL TRAFFIC** - No threat detected")
+                        st.info(f"🔒 Confidence: {probability[0]*100:.2f}%")
+                        st.write("**Status:** Traffic appears legitimate. Continue monitoring.")
+                    else:
+                        st.error(f"🚨 **ATTACK DETECTED** - Potential intrusion!")
+                        st.warning(f"⚠️ Threat Probability: {probability[1]*100:.2f}%")
+                        st.write("**Recommended Actions:**")
+                        st.write("- 🛑 Block source IP immediately")
+                        st.write("- 📧 Alert security team")
+                        st.write("- 📝 Log incident for analysis")
+                        st.write("- 🔍 Investigate traffic patterns")
+                    
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=probability[1]*100,
+                        title={'text': "Attack Probability"},
+                        gauge={
+                            'axis': {'range': [None, 100]},
+                            'bar': {'color': "darkred" if prediction == 1 else "darkgreen"},
+                            'steps': [
+                                {'range': [0, 30], 'color': "lightgreen"},
+                                {'range': [30, 70], 'color': "yellow"},
+                                {'range': [70, 100], 'color': "lightcoral"}
+                            ],
+                            'threshold': {
+                                'line': {'color': "red", 'width': 4},
+                                'thickness': 0.75,
+                                'value': 50
+                            }
+                        }
+                    ))
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.write("**Multi-Model Consensus:**")
+                
+                if st.button("🔬 Analyze with All Models", use_container_width=True):
+                    test_df = pd.DataFrame([input_data])
+                    
+                    consensus_results = []
+                    
+                    for model_name, model in models.items():
+                        pred = model.predict(test_df)[0]
+                        prob = model.predict_proba(test_df)[0]
+                        
+                        consensus_results.append({
+                            'Model': model_name,
+                            'Prediction': 'Attack' if pred == 1 else 'Normal',
+                            'Confidence': f"{max(prob)*100:.1f}%",
+                            'Attack_Prob': prob[1]
+                        })
+                    
+                    consensus_df = pd.DataFrame(consensus_results)
+                    
+                    # Visual representation
+                    fig = px.bar(consensus_df, x='Model', y='Attack_Prob',
+                                color='Prediction',
+                                title='Model Predictions Comparison',
+                                labels={'Attack_Prob': 'Attack Probability'},
+                                color_discrete_map={'Attack': '#FF6B6B', 'Normal': '#4ECDC4'})
+                    fig.update_layout(yaxis_range=[0, 1], height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.dataframe(consensus_df[['Model', 'Prediction', 'Confidence']], 
+                               use_container_width=True, hide_index=True)
+                    
+                    # Majority voting
+                    attack_count = sum(1 for r in consensus_results if r['Prediction'] == 'Attack')
+                    majority = "Attack" if attack_count > len(models)/2 else "Normal"
+                    
+                    st.info(f"🗳️ **Majority Vote:** {majority} ({attack_count}/{len(models)} models)")
         
-        if st.button("🔍 Analyze Traffic", width="stretch"):
-            # Create DataFrame
-            test_df = pd.DataFrame([input_data])
+        with tab5:
+            st.subheader("📜 Training History & Report Generation")
             
-            # Predict
-            prediction = model.predict(test_df)[0]
-            probability = model.predict_proba(test_df)[0]
-            
-            # Display result
-            st.markdown("### 🎯 Detection Result")
-            
-            if prediction == 0:
-                st.success("✅ **NORMAL TRAFFIC** - No threat detected")
-                st.info(f"Confidence: {probability[0]*100:.2f}%")
+            if st.session_state['training_history']:
+                st.write("**Recent Training Sessions:**")
+                
+                history_df = pd.DataFrame(st.session_state['training_history'])
+                history_df['accuracy_pct'] = history_df['accuracy'] * 100
+                
+                st.dataframe(
+                    history_df[['timestamp', 'model', 'accuracy_pct', 'samples']].tail(10),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        'timestamp': 'Training Time',
+                        'model': 'Model',
+                        'accuracy_pct': st.column_config.NumberColumn('Accuracy (%)', format="%.2f"),
+                        'samples': 'Samples'
+                    }
+                )
+                
+                st.write("**Accuracy Trend Over Time:**")
+                
+                fig = px.line(history_df.tail(20), x='timestamp', y='accuracy_pct', 
+                             color='model', markers=True,
+                             title='Model Performance Over Time',
+                             labels={'accuracy_pct': 'Accuracy (%)', 'timestamp': 'Time'})
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                st.error("🚨 **ATTACK DETECTED** - Potential intrusion!")
-                st.warning(f"Threat Probability: {probability[1]*100:.2f}%")
-                st.write("**Recommended Action:** Block source IP and alert security team")
+                st.info("No training history available yet.")
+            
+            st.markdown("---")
+            st.write("**📊 Generate Comprehensive Report:**")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("📄 Generate PDF Report", use_container_width=True):
+                    st.info("PDF report generation feature - Coming soon!")
+            
+            with col2:
+                if st.button("📊 Export Results CSV", use_container_width=True):
+                    # Create results dataframe
+                    results_data = []
+                    for model_name, result in results.items():
+                        cm = result['confusion_matrix']
+                        tn, fp, fn, tp = cm.ravel()
+                        
+                        results_data.append({
+                            'Model': model_name,
+                            'Accuracy': result['accuracy'],
+                            'ROC_AUC': result['roc_auc'],
+                            'True_Positives': tp,
+                            'True_Negatives': tn,
+                            'False_Positives': fp,
+                            'False_Negatives': fn
+                        })
+                    
+                    results_df = pd.DataFrame(results_data)
+                    csv = results_df.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="💾 Download CSV",
+                        data=csv,
+                        file_name=f"nids_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+            
+            with col3:
+                if st.button("🔄 Clear History", use_container_width=True):
+                    st.session_state['training_history'] = []
+                    st.session_state['prediction_count'] = {'normal': 0, 'attack': 0}
+                    st.success("✅ History cleared!")
+                    st.rerun()
+            
+            st.markdown("---")
+            st.write("**📊 System Statistics:**")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("🎓 Total Trainings", len(st.session_state['training_history']))
+            with col2:
+                if st.session_state['training_history']:
+                    avg_acc = np.mean([h['accuracy'] for h in st.session_state['training_history']])
+                    st.metric("📈 Avg Accuracy", f"{avg_acc*100:.2f}%")
+                else:
+                    st.metric("📈 Avg Accuracy", "N/A")
+            with col3:
+                total_predictions = sum(st.session_state['prediction_count'].values())
+                st.metric("🔍 Total Predictions", total_predictions)
+            with col4:
+                st.metric("🗂️ Dataset Size", len(data))
     
     else:
-        st.info("👈 Click **'Train Model Now'** in the sidebar to start")
+        st.info("👈 **Configure settings in sidebar and click 'Train Models Now' to begin**")
         
-        # Instructions
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            ### 🤖 Multi-Model Support
+            - Random Forest
+            - Gradient Boosting
+            - Support Vector Machine
+            - Neural Network
+            """)
+        
+        with col2:
+            st.markdown("""
+            ### 📊 Advanced Analytics
+            - ROC & PR Curves
+            - Feature Importance
+            - Correlation Analysis
+            - Real-time Metrics
+            """)
+        
+        with col3:
+            st.markdown("""
+            ### 🎯 Professional Features
+            - Multi-model Consensus
+            - Training History
+            - Export Reports
+            - Live Detection
+            """)
+        
         st.markdown("---")
-        st.subheader("📖 How to Use This System")
+        st.subheader("📖 Quick Start Guide")
+        
         st.markdown("""
-        1. **Download CIC-IDS2017 Dataset** from [UNB Website](https://www.unb.ca/cic/datasets/ids-2017.html)
-        2. **Place CSV file** in the `AI_NIDS_Project` folder
-        3. **Select the CSV file** from sidebar dropdown
-        4. **Click 'Train Model Now'** to train the ML model
-        5. **Test with Live Simulator** to detect attacks
+        1. **📁 Dataset Setup:**
+           - Download CIC-IDS2017 dataset from [UNB Website](https://www.unb.ca/cic/datasets/ids-2017.html)
+           - Create `Datasets` folder in your project directory
+           - Place CSV files in the `Datasets` folder
+           - Or use simulated data for testing
+        
+        2. **🤖 Model Configuration:**
+           - Select one or more ML models from sidebar
+           - Adjust simulated data size if needed
+           - Click "🚀 Train Models Now"
+        
+        3. **📊 Analysis:**
+           - View dataset overview and statistics
+           - Compare model performances
+           - Explore advanced analytics and visualizations
+        
+        4. **🔴 Live Detection:**
+           - Test with custom network parameters
+           - Get multi-model predictions
+           - Track detection statistics
+        
+        5. **📜 Reports:**
+           - View training history
+           - Export results to CSV
+           - Generate comprehensive reports
         """)
+        
+        st.markdown("---")
+        st.info("💡 **Tip:** Start with Random Forest and Gradient Boosting for best performance!")
 
 if __name__ == "__main__":
     main()
