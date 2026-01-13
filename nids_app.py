@@ -24,10 +24,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+theme_enable = False
+
+# Custom CSS for better UI
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.5rem;
+        font-size: 90px;
         font-weight: bold;
         color: #1f77b4;
         text-align: center;
@@ -45,24 +48,122 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="main-header">🛡️ Advanced AI Network Intrusion Detection System</p>', unsafe_allow_html=True)
+# Title and Description
+# st.markdown('<p class="main-header" style="font-size: 60px !important; line-height: 1.2;">🛡️ Advanced AI Network Intrusion Detection System</p>', unsafe_allow_html=True)
+
 st.markdown("""
-<div style='text-align: center; margin-bottom: 2rem;'>
+    <h1 class="main-header" style='text-align: center; font-size: 90px !important; color: #00d4ff; margin-bottom: 0px;'>
+        🛡️ Advanced AI Network Intrusion Detection System
+    </h1>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div style='text-align: center; font-size: 20px; margin-bottom: 20px;'>
     <b>Professional Network Security Monitoring with Advanced Machine Learning</b><br>
     Multi-Model Analysis | Real-time Detection | Comprehensive Analytics
 </div>
 """, unsafe_allow_html=True)
 
+# Initialize session state
 if 'training_history' not in st.session_state:
     st.session_state['training_history'] = []
 if 'prediction_count' not in st.session_state:
     st.session_state['prediction_count'] = {'normal': 0, 'attack': 0}
+if 'theme' not in st.session_state:
+    st.session_state['theme'] = 'Dark Mode'
 
 st.sidebar.header("⚙️ Advanced Control Panel")
 st.sidebar.markdown("---")
 
-theme = st.sidebar.selectbox("🎨 Theme", ["Professional", "Dark Mode", "Light Mode"])
+# Theme Enable Logic
+if theme_enable:
+    available_themes = ["Dark Mode", "Light Mode"]
 
+    current_val = st.session_state.get('theme', 'Dark Mode')
+    if current_val not in available_themes:
+        current_val = 'Dark Mode'
+        
+    theme = st.sidebar.selectbox("🎨 Theme", available_themes, 
+    index=available_themes.index(current_val))
+else:
+    theme = 'Dark Mode'
+
+# Update theme in session state
+if theme != st.session_state['theme']:
+    st.session_state['theme'] = theme
+    st.rerun()
+
+# Apply theme-specific CSS
+if theme == "Dark Mode":
+    st.markdown("""
+    <style>
+        .stApp {
+            background-color: #0e1117;
+            color: #ffffff;
+        }
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #00d4ff;
+            text-align: center;
+            margin-bottom: 1rem;
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+        }
+        .stMetric {
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid #00d4ff;
+        }
+        .stButton>button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .stButton>button:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            box-shadow: 0 0 15px rgba(118, 75, 162, 0.8);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+elif theme == "Light Mode":
+    st.markdown("""
+    <style>
+        .stApp {
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #0066cc;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        .stMetric {
+            background: linear-gradient(135deg, #ffffff 0%, #e9ecef 100%);
+            padding: 1rem;
+            border-radius: 10px;
+            border: 2px solid #0066cc;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stButton>button {
+            background: linear-gradient(135deg, #0066cc 0%, #004499 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .stButton>button:hover {
+            background: linear-gradient(135deg, #004499 0%, #0066cc 100%);
+            box-shadow: 0 4px 8px rgba(0, 102, 204, 0.3);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Function to generate simulated data
 def generate_simulation_data(num_samples=1000):
     """Generate realistic network traffic data for training"""
     np.random.seed(42)
